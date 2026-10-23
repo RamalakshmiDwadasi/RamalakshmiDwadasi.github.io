@@ -23,6 +23,9 @@ jobs:
         with:
           enablement: true
 
+      - name: Install PDF link updater
+        run: python3 -m pip install --quiet pypdf
+
       - name: Create independent static copy
         shell: bash
         run: |
@@ -79,6 +82,30 @@ jobs:
           missing = [path for path in required if not (site / path).is_file()]
           if missing:
               raise SystemExit(f"Static copy is incomplete: {missing}")
+
+          # Keep the résumé's portfolio hyperlink aligned with this public site.
+          from pypdf import PdfReader, PdfWriter
+          from pypdf.generic import TextStringObject
+
+          resume = site / "ramalakshmi-dwadasi-cv.pdf"
+          reader = PdfReader(resume)
+          writer = PdfWriter()
+          writer.clone_document_from_reader(reader)
+
+          old_url = "https://ramalakshmi-portfolio.ramalakshmi-dwadasi.chatgpt.site"
+          new_url = "https://ramalakshmidwadasi.github.io/"
+
+          for page in writer.pages:
+              for annotation_ref in page.get("/Annots", []) or []:
+                  annotation = annotation_ref.get_object()
+                  action = annotation.get("/A")
+                  if action and str(action.get("/URI", "")) == old_url:
+                      action.update({"/URI": TextStringObject(new_url)})
+
+          corrected_resume = site / "ramalakshmi-dwadasi-cv-updated.pdf"
+          with corrected_resume.open("wb") as output:
+              writer.write(output)
+          corrected_resume.replace(resume)
 
           (site / ".nojekyll").touch()
           (site / "404.html").write_text(
