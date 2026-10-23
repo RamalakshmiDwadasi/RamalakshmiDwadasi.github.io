@@ -1,0 +1,106 @@
+name: Publish firewall-safe portfolio
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Create independent static copy
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          temp_dir="$(mktemp -d)"
+          cd "$temp_dir"
+
+          wget \
+            --mirror \
+            --page-requisites \
+            --convert-links \
+            --adjust-extension \
+            --no-parent \
+            --domains ramalakshmi-portfolio.ramalakshmi-dwadasi.chatgpt.site \
+            --execute robots=off \
+            --quiet \
+            https://ramalakshmi-portfolio.ramalakshmi-dwadasi.chatgpt.site/
+
+          source_dir="$temp_dir/ramalakshmi-portfolio.ramalakshmi-dwadasi.chatgpt.site"
+          cp -a "$source_dir/." "$GITHUB_WORKSPACE/_site/"
+          cd "$GITHUB_WORKSPACE"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          site = Path("_site")
+          pages = list(site.rglob("*.html"))
+
+          for page in pages:
+              html = page.read_text(encoding="utf-8")
+              html = re.sub(
+                  r"<script\b[^>]*>.*?</script>",
+                  "",
+                  html,
+                  flags=re.IGNORECASE | re.DOTALL,
+              )
+              page.write_text(html, encoding="utf-8")
+
+          required = [
+              "index.html",
+              "work.html",
+              "about.html",
+              "experience.html",
+              "contact-resume.html",
+              "work/pharos.html",
+              "work/call-agent-application.html",
+              "work/online-registration.html",
+              "ramalakshmi-watercolor-feathered.png",
+              "ramalakshmi-dwadasi-cv.pdf",
+          ]
+
+          missing = [path for path in required if not (site / path).is_file()]
+          if missing:
+              raise SystemExit(f"Static copy is incomplete: {missing}")
+
+          (site / ".nojekyll").touch()
+          (site / "404.html").write_text(
+              (site / "index.html").read_text(encoding="utf-8"),
+              encoding="utf-8",
+          )
+
+          print(f"Prepared {len(pages)} pages and {sum(1 for p in site.rglob('*') if p.is_file())} files")
+          PY
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
